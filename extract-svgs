@@ -1,20 +1,39 @@
 #!/bin/zsh
 
-# Usage: ./convert-image.sh <input_image> <output_image> <color_count>
-# Example: ./convert-image.sh input.jpg output.png 16
-# This script converts an image to a specified format and reduces the number of colors.
-# It also displays the colors in hex format.
-# Check if the correct number of arguments is provided
+# TODO: Specify the colors you want to conform to using a palette
+#       This would allow user to specify the filament colors that can be made and map the image
+#       to those colors.
+#       See (instead of -colors) https://imagemagick.org/script/command-line-options.php#remap
+#           # Create a palette with one color per pixel for the colors you want to use
+#           magick -size 1x4 xc:red xc:green xc:blue xc:yellow -append palette.png 
+#           # Remap the image to the palette
+#           magick input.png -remap palette.png output.png
 
 function usage() {
-    echo "Usage: $0 <input_image> <output_location> <color_count> [--rect-size|-s <rect_size>] [--alignment-corners|-c (tlbr|trbl|none)] [--help] [--no-confirm|-n] [--delete-output|-d]"
+    echo
+    echo "Description:"
+    echo "This script limits the number of colors in a file and then extracts each color into a separate SVG "
+    echo "file suitable for importing into Tinkercad."
+    echo "It also adds a small rectangle in two corners of the image to help with alignment and sizing."
+    echo
+    echo "Usage:"
+    echo "  $0 <input_image> <output_location> <color_count> [--rect-size|-s <rect_size>] [--alignment-corners|-c (tl|tr|bl|br|none)] [--help] [--no-confirm|-n] [--delete-output|-d]"
     echo
     echo "Options:"
-    echo "  -c (tlbr|trbl|none), --rect-corners (tlbr|trbl|none)    Set the corners of the rectangle (default: tlbr)"
-    echo "  -d, --delete-output                                     Delete the output files after processing"
-    echo "  --help                                                  Show this help message"
-    echo "  -n, --no-confirm                                        Skip confirmation before processing"
-    echo "  -s <rect_size>, --rect-size <rect_size>                 Set the size of the rectangle (default: 100)"
+    echo "  -c (tlbr|trbl|none), --rect-corners <corners>   Set the corners of the rectangle (default: tlbr)"
+    echo "                                                  Acceptable values:"
+    echo "                                                  * tlbr: Top Left, Bottom Right"
+    echo "                                                  * trbl: Top Right, Bottom Left"
+    echo "                                                  * top: Top Left, Top Right"
+    echo "                                                  * bottom: Bottom Left, Bottom Right"
+    echo "                                                  * left: Top Left, Bottom Left"
+    echo "                                                  * right: Top Right, Bottom Right"
+    echo "                                                  * all: All corners"
+    echo "                                                  * none: No alignment squares"
+    echo "  -d, --delete-output                             Delete the output files after processing"
+    echo "  --help                                          Show this help message"
+    echo "  -n, --no-confirm                                Skip confirmation before processing"
+    echo "  -s <rect_size>, --rect-size <rect_size>         Set the size of the rectangle (default: 100)"
     echo
     echo "Example: $0 input.jpg output.png 16 --rect-size 100 --rect-corners tlbr"
     exit 1
@@ -27,12 +46,11 @@ fi
 
 # Assign arguments to variables
 INPUT_IMAGE=$1
-OUTPUT_LOCATION=$(realpath $2)
+OUTPUT_LOCATION=$2
 COLOR_COUNT=$3
 
 # Set values for arguments
 RECT_SIZE=100
-ALIGN_CORNERS="tlbr"
 NO_CONFIRM=false
 
 # Parse optional arguments
@@ -44,11 +62,24 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -c|--alignment-corners)
-            ALIGN_CORNERS=$2
-            #Ensure the value is either tlbr or trbl
-            if [[ "$ALIGN_CORNERS" != "tlbr" && "$ALIGN_CORNERS" != "trbl" && "$ALIGN_CORNERS" != "none" ]]; then
-                echo "Invalid value for --rect-corners. Use either tlbr or trbl."
-                exit 1
+            local CORNER=$2:l
+            if typeset -p bob 2>/dev/null | grep -q "\-a" ; then
+                ALIGN_CORNERS=()
+            fi
+
+            ALIGN_CORNERS+=("$CORNER")
+            # Ensure the value is one of the accepted values
+            # tlbr: Top Left, Bottom Right
+            # trbl: Top Right, Bottom Left
+            # top: Top Left, Top Right
+            # bottom: Bottom Left, Bottom Right
+            # left: Top Left, Bottom Left
+            # right: Top Right, Bottom Right
+            # all: All corners
+            # none: No alignment squares
+            if [[ "$CORNER" != "tl" && "$CORNER" != "tr" && "$CORNER" != "bl" && "$CORNER" != "br" && "$CORNER" != "all" && "$CORNER" != "none" ]]; then
+                echo "Invalid value for --rect-corners: $CORNER"
+                usage
             fi
             shift 2
             ;;
@@ -71,6 +102,22 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Check if corners contain none and anything else
+if [[ "$ALIGN_CORNERS" == *"none"* && "${#ALIGN_CORNERS[@]}" -gt 1 ]]; then
+    echo "You cannot specify --rect-corners as none and any other corners at the same time."
+    exit 1
+fi
+
+# If all is specified for the corners, turn on all corners
+if [[ "$ALIGN_CORNERS" == *"all"* ]]; then
+    ALIGN_CORNERS=(tl tr bl br)
+fi
+
+# If no corners are specified, set the default to tlbr
+if [[ "${#ALIGN_CORNERS[@]}" -eq 0 ]]; then
+    ALIGN_CORNERS=(tl br)
+fi
 
 # Check if the input image exists
 if [ ! -f "$INPUT_IMAGE" ]; then
@@ -127,6 +174,7 @@ fi
 
 # Create the output directory if it doesn't exist
 mkdir -p "$OUTPUT_LOCATION"
+OUTPUT_LOCATION=$(realpath "$OUTPUT_LOCATION")
 # Check if the output directory was created successfully
 if [ $? -ne 0 ]; then
     echo "Failed to create output directory!"
@@ -253,7 +301,7 @@ else
 fi
 
 # Extract the alpha channel from the image
-ALPHA_IMAGE="$OUTPUT_LOCATION/alpha_$COLOR_COUNT.png"
+ALPHA_IMAGE="$OUTPUT_LOCATION/transparent_$COLOR_COUNT.png"
 magick "$COLOR_IMAGE" -alpha extract "$ALPHA_IMAGE"
 # Check if the alpha extraction was successful
 if [ $? -ne 0 ]; then
@@ -284,8 +332,8 @@ for COLOR in "${COLOR_ARRAY[@]}"; do
     INDEX=$((INDEX+1))
 
     # Set the corners based on the specified option
-    if [[ "$ALIGN_CORNERS" != "none" ]]; then
-        echo -n "- Adding Alignment Squares to image..."
+    if [[ "$ALIGN_CORNERS" != *"none"* ]]; then
+        echo -n "- Adding Alignment Corners to image ($ALIGN_CORNERS)..."
 
         # Calculate the size of the rectangles so they aren't bigger than 5% of the image
         CALC_RECT_SIZE=$((WIDTH * 5 / 100))
@@ -298,17 +346,41 @@ for COLOR in "${COLOR_ARRAY[@]}"; do
             RECT_SIZE=10
         fi
 
-        # Create the rectangles based on the specified corners
-        if [[ "$ALIGN_CORNERS" == "tlbr" ]]; then
-            FIRST_CORNERS="0,0 $RECT_SIZE,$RECT_SIZE"
-            SECOND_CORNERS="$((WIDTH-RECT_SIZE)),$((HEIGHT-RECT_SIZE)) $WIDTH,$HEIGHT"
-        elif [[ "$ALIGN_CORNERS" == "trbl" ]]; then
-            FIRST_CORNERS="$((WIDTH-RECT_SIZE)),$((HEIGHT-RECT_SIZE)) $WIDTH,$HEIGHT"
-            SECOND_CORNERS="0,0 $RECT_SIZE,$RECT_SIZE"
-        fi
+        TLRECT="rectangle 0,0 $RECT_SIZE,$RECT_SIZE"
+        TRRECT="rectangle $((WIDTH-RECT_SIZE)),0 $WIDTH,$RECT_SIZE"
+        BRRECT="rectangle $((WIDTH-RECT_SIZE)),$((HEIGHT-RECT_SIZE)) $WIDTH,$HEIGHT"
+        BLRECT="rectangle 0,$((HEIGHT-RECT_SIZE)) $RECT_SIZE,$HEIGHT"
+
+        TLDRAW=""
+        TRDRAW=""
+        BLDRAW=""
+        BRDRAW=""
+
+        # Set the corners based on the specified option
+        for CORNER in "${ALIGN_CORNERS[@]}"; do
+            case $CORNER in
+                tl)
+                    TLDRAW=$TLRECT
+                    ;;
+                tr)
+                    TRDRAW=$TRRECT
+                    ;;
+                bl)
+                    BLDRAW=$BLRECT
+                    ;;
+                br)
+                    BRDRAW=$BRRECT
+                    ;;
+                *)
+                    echo "Invalid value for --rect-corners: $CORNER"
+                    usage
+                    exit 1
+                    ;;
+            esac
+        done
 
         # Create small block in the corner for alignment
-        magick "$COLOR_IMAGE" -fill "$COLOR" -draw "rectangle $FIRST_CORNERS" -draw "rectangle $SECOND_CORNERS" "$TEMP_FILENAME"
+        magick "$COLOR_IMAGE" -fill "$COLOR" -draw "$TLDRAW" -draw "$BLDRAW" -draw "$TRDRAW" -draw "$BRDRAW" "$TEMP_FILENAME"
         # Check if the rectangle creation was successful
         if [ $? -ne 0 ]; then
             echo "Alignment Square creation failed!"
