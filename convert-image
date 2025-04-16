@@ -1,0 +1,357 @@
+#!/bin/zsh
+
+# Usage: ./convert-image.sh <input_image> <output_image> <color_count>
+# Example: ./convert-image.sh input.jpg output.png 16
+# This script converts an image to a specified format and reduces the number of colors.
+# It also displays the colors in hex format.
+# Check if the correct number of arguments is provided
+
+function usage() {
+    echo "Usage: $0 <input_image> <output_location> <color_count> [--rect-size|-s <rect_size>] [--alignment-corners|-c (tlbr|trbl|none)] [--help] [--no-confirm|-n] [--delete-output|-d]"
+    echo
+    echo "Options:"
+    echo "  -c (tlbr|trbl|none), --rect-corners (tlbr|trbl|none)    Set the corners of the rectangle (default: tlbr)"
+    echo "  -d, --delete-output                                     Delete the output files after processing"
+    echo "  --help                                                  Show this help message"
+    echo "  -n, --no-confirm                                        Skip confirmation before processing"
+    echo "  -s <rect_size>, --rect-size <rect_size>                 Set the size of the rectangle (default: 100)"
+    echo
+    echo "Example: $0 input.jpg output.png 16 --rect-size 100 --rect-corners tlbr"
+    exit 1
+}
+
+# Parse the input arguments
+if [ $# -lt 3 ]; then
+    usage
+fi
+
+# Assign arguments to variables
+INPUT_IMAGE=$1
+OUTPUT_LOCATION=$(realpath $2)
+COLOR_COUNT=$3
+
+# Set values for arguments
+RECT_SIZE=100
+ALIGN_CORNERS="tlbr"
+NO_CONFIRM=false
+
+# Parse optional arguments
+shift 3
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -s|--rect-size)
+            RECT_SIZE=$2
+            shift 2
+            ;;
+        -c|--alignment-corners)
+            ALIGN_CORNERS=$2
+            #Ensure the value is either tlbr or trbl
+            if [[ "$ALIGN_CORNERS" != "tlbr" && "$ALIGN_CORNERS" != "trbl" && "$ALIGN_CORNERS" != "none" ]]; then
+                echo "Invalid value for --rect-corners. Use either tlbr or trbl."
+                exit 1
+            fi
+            shift 2
+            ;;
+        -d|--delete-output)
+            DELETE_OUTPUT=true
+            shift
+            ;;
+        -n|--no-confirm)
+            NO_CONFIRM=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+# Check if the input image exists
+if [ ! -f "$INPUT_IMAGE" ]; then
+    echo "Input image not found!"
+    exit 1
+fi
+
+# Check if ImageMagick is installed
+if ! command -v magick &> /dev/null; then
+    echo "ImageMagick could not be found. Please install it to use this script."
+    echo "brew install imagemagick"
+    exit 1
+fi
+
+# Check if Potrace is installed
+if ! command -v potrace &> /dev/null; then
+    echo "Potrace could not be found. Please install it to use this script."
+    echo "brew install potrace"
+    exit 1
+fi
+
+# Check if Inkscape is installed
+if ! command -v inkscape &> /dev/null; then
+    echo "Inkscape could not be found. Please install it to use this script."
+    echo "brew install --cask inkscape"
+    exit 1
+fi
+
+# Ask to remove output files or just do it if the delete option is set
+if [[ -e "$OUTPUT_LOCATION" && ! -d "$OUTPUT_LOCATION" ]]; then
+    echo "Output location is not a directory!"
+    exit 1
+fi
+
+if [[ -e "$OUTPUT_LOCATION" ]]; then
+    if [ "$DELETE_OUTPUT" = true ]; then
+        DO_DELETE="Y"
+    else
+        echo
+        echo "Output location exists: $OUTPUT_LOCATION"
+        echo -n "Do you want to delete the output files? (Y/n) "
+        read DO_DELETE
+        DO_DELETE=${DO_DELETE:-Y}
+    fi
+
+    if [[ "$DO_DELETE:u" == "Y" ]]; then
+        if [ -d "$OUTPUT_LOCATION" ]; then
+            echo -n "Deleting output directory..."
+            rm -rf "$OUTPUT_LOCATION"
+            echo "done"
+        fi
+    fi
+fi
+
+# Create the output directory if it doesn't exist
+mkdir -p "$OUTPUT_LOCATION"
+# Check if the output directory was created successfully
+if [ $? -ne 0 ]; then
+    echo "Failed to create output directory!"
+    exit 1
+fi
+# Check if the color count is a valid number
+if ! [[ "$COLOR_COUNT" =~ ^[0-9]+$ ]]; then
+    echo "Color count must be a valid number!"
+    exit 1
+fi
+# Check if the color count is within a reasonable range
+if [ "$COLOR_COUNT" -lt 1 ] || [ "$COLOR_COUNT" -gt 256 ]; then
+    echo "Color count must be between 1 and 256!"
+    exit 1
+fi
+
+
+# Function to display a hex color with contrasting text in the terminal
+function display_hex_color() {
+  # Usage
+  # Call the function with a hex code (e.g., #FF573380 for red with transparency)
+  local hex_code=$1
+  local line_length=50 # Set the fixed line length
+  
+  # Extract RGBA components from the hex code
+  local r=${hex_code:1:2}
+  local g=${hex_code:3:2}
+  local b=${hex_code:5:2}
+  local a=${hex_code:7:2}
+
+  # Convert hex to decimal
+  local red=$((16#$r))
+  local green=$((16#$g))
+  local blue=$((16#$b))
+  local alpha=$((16#$a))
+
+  # Calculate the luminance of the background color
+  # Using the formula: Luminance = 0.299*R + 0.587*G + 0.114*B
+  local luminance=$(echo "0.299 * $red + 0.587 * $green + 0.114 * $blue" | bc)
+
+  # Determine the text color (white or black) based on luminance
+  local text_color="255;255;255" # Default to white
+  if (( $(echo "$luminance > 128" | bc -l) )); then
+    text_color="0;0;0" # Use black if the background is light
+  fi
+
+  # Calculate the alpha transparency as a percentage
+  local alpha_percent=$((alpha * 100 / 255))
+
+  # Create the message to display
+  local message="HEX: ${hex_code} (Alpha: ${alpha_percent}%)"
+
+  # Print the color block with contrasting text
+  printf "\e[48;2;${red};${green};${blue}m\e[38;2;${text_color}m%-*.*s\e[0m\n" "$line_length" "$line_length" "$message"
+}
+
+# Function to check if an SVG has any drawable elements
+function svg_has_drawable_elements() {
+  local svg_file="$1"
+
+  # Check for drawable elements in the SVG file
+  if grep -E "<\s*(path|rect|circle|polygon|line|ellipse|text)\b" "$svg_file" | grep -v '<!--' > /dev/null; then
+    echo "true"
+    return 0
+  else
+    echo "false"
+    return 1
+  fi
+}
+
+COLOR_IMAGE="$OUTPUT_LOCATION/color_$COLOR_COUNT.png"
+echo
+# Convert the image to an x-color version of the image
+echo -n "Converting image to $COLOR_COUNT colors..."
+magick "$INPUT_IMAGE" -fuzz 20% -colors $COLOR_COUNT -depth 8 "$COLOR_IMAGE"
+# Check if the conversion was successful
+if [ $? -ne 0 ]; then
+    echo "Image conversion failed!"
+    exit 1
+fi
+echo "done"
+
+COLOR_ARRAY=()
+# Get the colors from the image
+echo -n "Extracting colors from image..."
+magick "$COLOR_IMAGE" -format %c -depth 8 histogram:info:- | while read line
+do
+    COLOR=`echo $line | awk '{print $3}'`
+    COLOR_ARRAY+=("$COLOR")
+done
+# Check if the color extraction was successful
+if [ $? -ne 0 ]; then
+    echo "Color extraction failed!"
+    exit 1
+fi
+# Remove duplicates from the array
+COLOR_ARRAY=($(printf "%s\n" "${COLOR_ARRAY[@]}" | sort -u))
+echo "done"
+echo
+echo "Converted image saved to $COLOR_IMAGE"
+echo
+echo "Found these ${#COLOR_ARRAY[@]} colors in the image:"
+echo
+for COLOR in "${COLOR_ARRAY[@]}"; do
+    display_hex_color $COLOR
+done
+echo
+
+# Check whether to continue
+
+if [ "$NO_CONFIRM" = true ]; then
+    continue="Y"
+else
+    echo -n "Do you want to continue? (Y/n): " 
+    read continue
+    continue=${continue:-Y}
+fi
+
+if [[ "$continue:u" == "Y" ]]; then
+    echo "Continuing..."
+else
+    echo "Exiting..."
+    exit 0
+fi
+
+# Extract the alpha channel from the image
+ALPHA_IMAGE="$OUTPUT_LOCATION/alpha_$COLOR_COUNT.png"
+magick "$COLOR_IMAGE" -alpha extract "$ALPHA_IMAGE"
+# Check if the alpha extraction was successful
+if [ $? -ne 0 ]; then
+    echo "Alpha extraction failed!"
+    exit 1
+fi
+# Display the alpha channel
+echo "Alpha channel saved to $ALPHA_IMAGE"
+echo
+
+# Get Width and Height of Image
+WIDTH=$(magick identify -format "%w" "$COLOR_IMAGE")
+HEIGHT=$(magick identify -format "%h" "$COLOR_IMAGE")
+
+echo "Source image size: ${WIDTH}x${HEIGHT}"
+
+INDEX=1
+# Loop through the colors
+for COLOR in "${COLOR_ARRAY[@]}"; do
+    FILECOLOR=$(echo ${COLOR:0:7} | sed 's/#//g')
+    TEMP_FILENAME="$OUTPUT_LOCATION/temp_$FILECOLOR.$COLOR_COUNT.png"
+    OUTPUT_FILENAME_BASE="$OUTPUT_LOCATION/$FILECOLOR.$COLOR_COUNT.layer"
+    OUTPUT_FILENAME_SVG="$OUTPUT_FILENAME_BASE.svg"
+    OUTPUT_FILENAME_PNG="$OUTPUT_FILENAME_BASE.png"
+    
+    echo
+    echo "($INDEX/${#COLOR_ARRAY[@]}) Processing color: #$FILECOLOR"
+    INDEX=$((INDEX+1))
+
+    # Set the corners based on the specified option
+    if [[ "$ALIGN_CORNERS" != "none" ]]; then
+        echo -n "- Adding Alignment Squares to image..."
+
+        # Calculate the size of the rectangles so they aren't bigger than 5% of the image
+        CALC_RECT_SIZE=$((WIDTH * 5 / 100))
+        # Take the smaller of the passed size and the calculated size
+        if [ $RECT_SIZE -gt $CALC_RECT_SIZE ]; then
+            RECT_SIZE=$CALC_RECT_SIZE
+        fi
+        # Ensure the rectangle size is at least 10 pixels
+        if [ $RECT_SIZE -lt 10 ]; then
+            RECT_SIZE=10
+        fi
+
+        # Create the rectangles based on the specified corners
+        if [[ "$ALIGN_CORNERS" == "tlbr" ]]; then
+            FIRST_CORNERS="0,0 $RECT_SIZE,$RECT_SIZE"
+            SECOND_CORNERS="$((WIDTH-RECT_SIZE)),$((HEIGHT-RECT_SIZE)) $WIDTH,$HEIGHT"
+        elif [[ "$ALIGN_CORNERS" == "trbl" ]]; then
+            FIRST_CORNERS="$((WIDTH-RECT_SIZE)),$((HEIGHT-RECT_SIZE)) $WIDTH,$HEIGHT"
+            SECOND_CORNERS="0,0 $RECT_SIZE,$RECT_SIZE"
+        fi
+
+        # Create small block in the corner for alignment
+        magick "$COLOR_IMAGE" -fill "$COLOR" -draw "rectangle $FIRST_CORNERS" -draw "rectangle $SECOND_CORNERS" "$TEMP_FILENAME"
+        # Check if the rectangle creation was successful
+        if [ $? -ne 0 ]; then
+            echo "Alignment Square creation failed!"
+            exit 1
+        fi
+        echo "done"
+    else
+        cp $COLOR_IMAGE $TEMP_FILENAME
+    fi
+
+    echo -n "- Converting image to SVG..."
+    magick "$TEMP_FILENAME" -fill transparent +opaque "$COLOR" -statistic Median 4 -flatten -monochrome pgm:- | potrace -s --color="${COLOR:0:7}" -o "$OUTPUT_FILENAME_SVG"
+    # Check if the conversion was successful
+    if [ $? -ne 0 ]; then
+        echo "SVG conversion failed!"
+        exit 1
+    fi
+    echo "done"
+
+    # Check if the SVG has any drawable elements
+    echo -n "- Checking if SVG has drawable elements..."
+    HAS_DRAWABLE_ELEMENTS=$(svg_has_drawable_elements "$OUTPUT_FILENAME_SVG")
+    if [[ "$HAS_DRAWABLE_ELEMENTS" == "true" ]]; then
+        # echo "SVG has drawable elements. Saving as $OUTPUT_FILENAME_SVG"
+        echo "done"
+
+        echo -n "- Converting SVG shapes to paths..."
+        # Convert the SVG shapes to paths
+        inkscape "$OUTPUT_FILENAME_SVG" --export-text-to-path --export-filename="$OUTPUT_FILENAME_SVG"
+        # Check if the conversion was successful
+        if [ $? -ne 0 ]; then
+            echo "SVG conversion failed!"
+            exit 1
+        fi
+        echo "done"
+    else
+        # echo "SVG has no drawable elements. Skipping $OUTPUT_FILENAME_SVG"
+        rm "$OUTPUT_FILENAME_SVG"
+        echo "done (skipped)"
+    fi
+
+    # Clean up the temporary file
+    rm $TEMP_FILENAME
+done
+
+echo "All done!"
