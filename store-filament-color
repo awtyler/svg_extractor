@@ -1,0 +1,236 @@
+#!/bin/sh
+
+# This script stores the various shades of a filament color in the Filaments directory.
+# Usage: store-filament-color.sh <plastic_type> <brand> <color_name> <hex_color> 
+#                                [--top-filament|-t <TOP_FILAMENT>] [--top-layers|-T <layers>] 
+#                                [--center-layers|-C <layers>]
+#                                [--bottom-filament|-b <BOTTOM_FILAMENT>] [--bottom-layers|-B <layers>]
+#                                [--layer-height|-l <layer_height>]
+#                                [--help|-h]
+#                                [--output-file|-o <output_file>]
+# Example: store-filament-color.sh PLA Bambu "Bambu Green" "#FF7F00" --top-filament "white" --top-layers 2 --center-layers 3 --bottom-filament "black" --bottom-layers 2
+# Function to display usage information
+function usage() {
+    echo "Usage: $0 <plastic_type> <brand> <color_name> <hex_color>"
+    echo "                              [--top-filament|-t <top_filament>]"
+    echo "                              [--top-layers|-T <layers>]"
+    echo "                              [--center-layers|-C <layers>]"
+    echo "                              [--bottom-filament|-b <bottom_filament>]"
+    echo "                              [--bottom-layers|-B <layers>]"
+    echo "                              [--layer-height|-l <layer_height>]"
+    echo "                              [--output-file|-o <output_file>]"
+    echo "                              [--help|-h]"
+    echo "                              [--wcb|-w <top_layers> <center_layers> <bottom_layers>]"
+    echo "                              [--wcw|-W <top_layers> <center_layers> <bottom_layers>]"
+    echo
+    echo "Options:"
+    echo "  plastic_type                Type of plastic (e.g., PLA, ABS)"
+    echo "  brand                       Brand of the filament (e.g., Bambu, Prusa)"
+    echo "  color_name                  Name of the filament color (e.g., Bambu Green)"
+    echo "  hex_color                   Hex color code of the filament (e.g., #FF7F00)"
+    echo "  --top-filament, -t          Top filament color (default: none)"
+    echo "  --top-layers, -T            Number of top layers (default: 0)"
+    echo "  --center-layers, -C         Number of center layers (required, must add up to 6 with top and bottom layers)"
+    echo "  --bottom-filament, -b       Bottom filament color (default: none)"
+    echo "  --bottom-layers, -B         Number of bottom layers (default: 0)"
+    echo "  --layer-height, -l          Layer height (default: 0.16)"
+    echo "  --output-file, -o           Output file path (default: filaments/Layer_Height_<layer_height>.json)"
+    echo "  --help, -h                  Display this help message"
+    echo "  --white-color-black, -w     Quickly add layers without specifying colors, where the top layer is Bambu White and the bottom layer is Bambu Black"
+    echo "  --white-color-white, -W     Quickly add layers without specifying colors, where the top layer is Bambu White and the bottom layer is Bambu White"
+    echo
+    echo "Example:"
+    echo "       $0 PLA Bambu \"Bambu Green\" \"#FF7F00\" --top-filament \"Bambu White\" --top-layers 2 --center-layers 3 --bottom-filament \"Bambu Black\" --bottom-layers 2"
+    echo "       $0 PLA Bambu \"Bambu Green\" \"#FF7F00\" --top-filament \"Bambu White\" --top-layers 2 --center-layers 3 --bottom-filament \"Bambu Black\" --bottom-layers 2 --layer-height 0.2 --output-file filaments/PLA/Bambu/Bambu_Green.json"
+    exit 1
+}
+
+if [ "$#" -lt 4 ]; then
+    usage
+fi
+PLASTIC_TYPE="$1"
+BRAND="$2"
+COLOR_NAME="$3"
+HEX_COLOR="$4"
+shift 4
+TOP_FILAMENT="none"
+TOP_LAYERS=0
+CENTER_LAYERS=0
+BOTTOM_FILAMENT="none"
+BOTTOM_LAYERS=0
+LAYER_HEIGHT="0.16" # Default layer height
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --top-filament|-t)
+            TOP_FILAMENT="$2"
+            shift 2
+            ;;
+        --top-layers|-T)
+            TOP_LAYERS="$2"
+            shift 2
+            ;;
+        --center-layers|-C)
+            CENTER_LAYERS="$2"
+            shift 2
+            ;;
+        --bottom-filament|-b)
+            BOTTOM_FILAMENT="$2"
+            shift 2
+            ;;
+        --bottom-layers|-B)
+            BOTTOM_LAYERS="$2"
+            shift 2
+            ;;
+        --layer-height|-l)
+            LAYER_HEIGHT="$2"
+            shift 2
+            ;;
+        --output-file|-o)
+            OUTPUT_FILE="$2"
+            shift 2
+            ;;
+        --white-color-black|-w)
+            # Quickly add layers without specifying colors, where the top layer is Bambu White and the bottom layer is Bambu Black
+            TOP_FILAMENT="Bambu White"
+            TOP_LAYERS=$2
+            CENTER_LAYERS=$3
+            BOTTOM_FILAMENT="Bambu Black"
+            BOTTOM_LAYERS=$4
+            shift 4
+            ;;
+        --white-color-white|-W)
+            # Quickly add layers without specifying colors, where the top layer is Bambu White and the bottom layer is Bambu White
+            TOP_FILAMENT="Bambu White"
+            TOP_LAYERS=$2
+            CENTER_LAYERS=$3
+            BOTTOM_FILAMENT="Bambu White"
+            BOTTOM_LAYERS=$4
+            shift 4
+            ;;
+        --help|-h)
+            usage
+            ;;
+        *)
+            echo "Unknown option: $1"
+            usage
+            ;;
+    esac
+done
+
+# Ensure that jq is installed
+if ! command -v jq >/dev/null 2>&1; then
+    echo "Error: jq is not installed. Please install jq to run this script."
+    echo "You can install jq using your package manager, e.g., 'brew install jq' in Homebrew."
+    exit 1
+fi
+
+# Set the default output file if not specified
+if [ -z "$OUTPUT_FILE" ]; then
+    # Create a directory structure based on plastic type, brand, and color name
+    LAYER_HEIGHT_SAFE=$(echo "$LAYER_HEIGHT" | tr '.' '_')
+    OUTPUT_FILE="filaments/Layer_Height_$LAYER_HEIGHT_SAFE.json"
+fi
+# Ensure the output file path is valid
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+# Center layers is required.
+if [ -z "$CENTER_LAYERS" ]; then
+    echo "Error: Center layers must be specified."
+    exit 1
+fi
+
+# Layers should not be empty
+if [ -z "$TOP_LAYERS" ]; then
+    TOP_LAYERS=0
+fi
+if [ -z "$BOTTOM_LAYERS" ]; then
+    BOTTOM_LAYERS=0
+fi
+
+# Top and Bottom Layers should be integers, default to 0 if not specified
+if ! [[ "$TOP_LAYERS" =~ ^[0-9]+$ ]]; then
+    echo "Error: Top layers must be a non-negative integer."
+    exit 1
+fi
+if ! [[ "$CENTER_LAYERS" =~ ^[0-9]+$ ]]; then
+    echo "Error: Center layers must be a non-negative integer."
+    exit 1
+fi
+if ! [[ "$BOTTOM_LAYERS" =~ ^[0-9]+$ ]]; then
+    echo "Error: Bottom layers must be a non-negative integer."
+    exit 1
+fi
+# Layers should add up to six
+if [ "$TOP_LAYERS" -gt 6 ] || [ "$CENTER_LAYERS" -gt 6 ] || [ "$BOTTOM_LAYERS" -gt 6 ]; then
+    echo "Error: Each layer count must be between 0 and 6."
+    exit 1
+fi
+# Ensure the total number of layers does not exceed 6
+TOTAL_LAYERS=$((TOP_LAYERS + CENTER_LAYERS + BOTTOM_LAYERS))
+if [ "$TOTAL_LAYERS" -ne 6 ]; then
+    echo "Error: The total number of layers (top + center + bottom) must be exactly 6."
+    exit 1
+fi
+
+# Validate the hex color format
+if ! [[ "$HEX_COLOR" =~ ^#[0-9A-Fa-f]{6}$ ]]; then
+    echo "Error: Hex color must be in the format #RRGGBB."
+    exit 1
+fi
+# Validate the plastic type and brand
+if [ -z "$PLASTIC_TYPE" ] || [ -z "$BRAND" ]; then
+    echo "Error: Plastic type and brand cannot be empty."
+    exit 1
+fi
+# Validate the color name
+if [ -z "$COLOR_NAME" ]; then
+    echo "Error: Color name cannot be empty."
+    exit 1
+fi
+# Ensure the output directory exists
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+# Create the JSON content
+JSON_CONTENT=$(cat <<EOF
+{
+    "plastic_type": "$PLASTIC_TYPE",
+    "brand": "$BRAND",
+    "color_name": "$COLOR_NAME",
+    "hex_color": "$HEX_COLOR",
+    "top_filament": "$TOP_FILAMENT",
+    "top_layers": $TOP_LAYERS,
+    "center_layers": $CENTER_LAYERS,
+    "bottom_filament": "$BOTTOM_FILAMENT",
+    "bottom_layers": $BOTTOM_LAYERS
+}
+EOF
+)
+
+# Create the output file if it does not exist
+OUTPUT_DIR=$(dirname "$OUTPUT_FILE")
+if [ ! -d "$OUTPUT_DIR" ]; then
+    mkdir -p "$OUTPUT_DIR"
+fi
+if [ ! -f "$OUTPUT_FILE" ]; then
+    echo "{}" > "$OUTPUT_FILE"  # Initialize with an empty JSON array
+fi
+
+# Append the JSON to the root level array in the output file
+jq --argjson new_element "$JSON_CONTENT" \
+   --arg array_key "filaments" \
+   'if .[$array_key] == null then .[$array_key] = [$new_element] else .[$array_key] += [$new_element] end' \
+   "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
+
+# Check if the operation was successful
+if [[ $? -eq 0 ]]; then
+  echo "Successfully added '$JSON_CONTENT' to the array 'filaments' in '$OUTPUT_FILE'."
+else
+  echo "Failed to update the JSON file."
+  exit 1
+fi
+
+# Write the JSON content to the output file
+# echo "$JSON_CONTENT" > "$OUTPUT_FILE"
+# Print a success message
+echo "Filament color stored successfully in $OUTPUT_FILE"

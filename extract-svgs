@@ -213,13 +213,6 @@ if [[ -n "$COLOR_COUNT" && ! "$COLOR_COUNT" =~ ^[0-9]+$ ]]; then
     echo "Color count must be a valid number!"
     exit 1
 fi
-# Check if the color count is within a reasonable range
-if [ -n "$COLOR_COUNT" ]; then
-    if [ [ "$COLOR_COUNT" -lt 1 ] || [ "$COLOR_COUNT" -gt 256 ] ]; then
-        echo "Color count must be between 1 and 256!"
-        exit 1
-    fi
-fi
 
 #endregion
 
