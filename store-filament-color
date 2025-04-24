@@ -129,7 +129,10 @@ fi
 if [ -z "$OUTPUT_FILE" ]; then
     # Create a directory structure based on plastic type, brand, and color name
     LAYER_HEIGHT_SAFE=$(echo "$LAYER_HEIGHT" | tr '.' '_')
-    OUTPUT_FILE="filaments/Layer_Height_$LAYER_HEIGHT_SAFE.json"
+    PLASTIC_TYPE_SAFE=$(echo "$PLASTIC_TYPE" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+    BRAND_SAFE=$(echo "$BRAND" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+    COLOR_NAME_SAFE=$(echo "$COLOR_NAME" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+    OUTPUT_FILE="filaments/$PLASTIC_TYPE_SAFE"_"$BRAND_SAFE"_"$COLOR_NAME_SAFE"_"$LAYER_HEIGHT_SAFE.json"
 fi
 # Ensure the output file path is valid
 mkdir -p "$(dirname "$OUTPUT_FILE")"

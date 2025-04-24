@@ -1,0 +1,50 @@
+#!/bin/zsh
+
+# <plastic_type> <brand> <color_name> <hex_color_1> <hex_color_2> <hex_color_3> <hex_color_4> <hex_color_5> <hex_color_6> <hex_color_7> <hex_color_8> <hex_color_9> <hex_color_10> <hex_color_11> <hex_color_12> <hex_color_13> <hex_color_14> <hex_color_15>
+
+function usage {
+    echo "Usage: $0 <plastic_type> <brand> <color_name> <layer_height> <hex_color_1> <hex_color_2> <hex_color_3> <hex_color_4> <hex_color_5> <hex_color_6> <hex_color_7> <hex_color_8> <hex_color_9> <hex_color_10> <hex_color_11> <hex_color_12> <hex_color_13> <hex_color_14> <hex_color_15>"
+    echo "Example: $0 PLA Bambu \"Bambu Green\" \"#FF7F00\" \"#00FF00\" \"#0000FF\" \"#FFFF00\" \"#FF00FF\" \"#00FFFF\" \"#FFFFFF\" \"#000000\" \"#808080\" \"#800000\" \"#008000\" \"#000080\" \"#808000\" \"#800080\" \"#008080\""
+    echo
+    echo "Options:"
+    echo "  plastic_type                Type of plastic (e.g., PLA, ABS)"
+    echo "  brand                       Brand of the filament (e.g., Bambu, Prusa)"
+    echo "  color_name                  Name of the filament color (e.g., Bambu Green)"
+    for i in {1..15}; do
+        echo "  hex_color_$i                Hex color code for color $i (e.g., #FF7F00)"
+    done
+    exit 1
+}
+
+# Require all colors to be provided
+if [ "$#" -lt 18 ]; then
+    usage
+fi
+PLASTIC_TYPE="$1"
+BRAND="$2"
+COLOR_NAME="$3"
+LAYER_HEIGHT="$4"
+shift 4
+COLORS=()
+for color in "$@"; do
+    if [[ ! $color =~ ^#?[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$ ]]; then
+        echo "Invalid color format: $color"
+        echo "Accepted formats: #RRGGBBAA, #RRGGBB, RRGGBBAA, RRGGBB"
+        exit 1
+    fi
+    COLORS+=("$color")
+done
+
+./store-filament-color-column "$PLASTIC_TYPE" "$BRAND" "$COLOR_NAME" "$LAYER_HEIGHT" "1" "${COLORS[1]}" "${COLORS[2]}" "${COLORS[3]}"
+./store-filament-color-column "$PLASTIC_TYPE" "$BRAND" "$COLOR_NAME" "$LAYER_HEIGHT" "2" "${COLORS[4]}" "${COLORS[5]}" "${COLORS[6]}"
+./store-filament-color-column "$PLASTIC_TYPE" "$BRAND" "$COLOR_NAME" "$LAYER_HEIGHT" "3" "${COLORS[7]}" "${COLORS[8]}" "${COLORS[9]}"
+./store-filament-color-column "$PLASTIC_TYPE" "$BRAND" "$COLOR_NAME" "$LAYER_HEIGHT" "4" "${COLORS[10]}" "${COLORS[11]}" "${COLORS[12]}"
+./store-filament-color-column "$PLASTIC_TYPE" "$BRAND" "$COLOR_NAME" "$LAYER_HEIGHT" "5" "${COLORS[13]}" "${COLORS[14]}" "${COLORS[15]}"
+# Notify the user
+if [[ $? -eq 0 ]]; then
+    echo "Palette created successfully for $PLASTIC_TYPE $BRAND $COLOR_NAME with layer height $LAYER_HEIGHT"
+else
+    echo "Failed to create palette."
+    exit 1
+fi
+

@@ -115,10 +115,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Check that only --palette or --colors is used, not both
-if [[ -n "$PALETTE_FILE" && -n "$COLOR_COUNT" ]]; then
-    echo "You cannot specify both --palette and --colors at the same time."
-    exit 1
-fi
+# if [[ -n "$PALETTE_FILE" && -n "$COLOR_COUNT" ]]; then
+#     echo "You cannot specify both --palette and --colors at the same time."
+#     exit 1
+# fi
 
 # If no --palette or --colors is specified, set the default to 16
 if [[ -z "$PALETTE_FILE" && -z "$COLOR_COUNT" ]]; then
@@ -275,8 +275,22 @@ function svg_has_drawable_elements() {
 
 echo
 
+if [[ -n "$PALETTE_FILE" && -n "$COLOR_COUNT" ]]; then
+    COLOR_IMAGE="$OUTPUT_LOCATION/color_mapped_$COLOR_COUNT.png"
+    FILE_SUBEXT="mapped_$COLOR_COUNT"
+
+    # Convert the image to an x-color version of the image
+    echo -n "Converting image using palette file ($PALETTE_FILE)..."
+    magick "$INPUT_IMAGE" -remap "$PALETTE_FILE" -colors $COLOR_COUNT -fuzz 20% -depth 8 "$COLOR_IMAGE"
+    # Check if the conversion was successful
+    if [ $? -ne 0 ]; then
+        echo "Image conversion failed!"
+        exit 1
+    fi
+    echo "done"
+
 # If a palette file is specified, use it to limit the colors
-if [[ -n "$PALETTE_FILE" ]]; then
+elif [[ -n "$PALETTE_FILE" ]]; then
     COLOR_IMAGE="$OUTPUT_LOCATION/color_mapped.png"
     FILE_SUBEXT="mapped"
 
@@ -289,10 +303,9 @@ if [[ -n "$PALETTE_FILE" ]]; then
         exit 1
     fi
     echo "done"
-fi
 
 # If color_count is provided, convert the image to that many colors
-if [[ -n "$COLOR_COUNT" ]]; then
+elif [[ -n "$COLOR_COUNT" ]]; then
     COLOR_IMAGE="$OUTPUT_LOCATION/color_$COLOR_COUNT.png"
     FILE_SUBEXT="$COLOR_COUNT"
 

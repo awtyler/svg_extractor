@@ -1,0 +1,114 @@
+#!/bin/zsh
+
+function usage {
+  echo "Usage: $0 <output_file> [--file|-f <file>] [--folder|-F <folder>] [--help|-h]"
+  echo "JSON file(s) should be create from the 'store-filament*' scripts."
+
+  echo "Options:"
+  echo "  --file, -f <file>      Specify a JSON file containing colors. This can be passed multiple times."
+  echo "  --folder, -F <folder>    Specify a folder containing JSON files with colors."
+  echo "  --help, -h         Display this help message."
+  exit 1
+}
+
+# Check if at least one color and an output file are provided
+if [[ $# -lt 2 ]]; then
+  usage
+fi
+
+# Extract the output file name
+output_file=$1
+shift  # Remove the output file from the list of arguments
+
+# Get files from command line arguments
+files=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --file|-f)
+      shift
+      if [[ -f $1 ]]; then
+        files+=("$1")
+      else
+        echo "File not found: $1"
+        exit 1
+      fi
+      ;;
+    --folder|-F)
+      shift
+      if [[ -d $1 ]]; then
+        files+=("$1"/*.json)
+      else
+        echo "Folder not found: $1"
+        exit 1
+      fi
+      ;;
+    --help|-h)
+      usage
+      ;;
+    *)
+      echo "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+# Get colors from JSON files
+# Format of JSON files should be:
+# {
+#   "filaments": [
+#     {
+#       "plastic_type": "PLA",
+#       "brand": "Bambu",
+#       "color_name": "Bambu Green",
+#       "hex_color": "#96AFAA",
+#       "top_filament": "Bambu White",
+#       "top_layers": 2,
+#       "center_layers": 3,
+#       "bottom_filament": "Bambu Black",
+#       "bottom_layers": 1
+#     },
+#     ...
+#   ]
+# }
+
+colors=()
+for file in "${files[@]}"; do
+  if [[ -f $file ]]; then
+    # Extract colors from JSON files using jq
+    extracted_colors=$(jq -r '.filaments[] | .hex_color' "$file")
+    if [[ $? -ne 0 ]]; then
+      echo "Failed to read JSON file: $file"
+      exit 1
+    fi
+    extracted_array=(${(f)extracted_colors})  # Convert to array
+    # echo "Extracted colors from $file: ${extracted_array[@]}"
+    colors+=($extracted_array)
+  else
+    echo "File not found: $file"
+    exit 1
+  fi
+done
+if [[ ${#colors[@]} -eq 0 ]]; then
+  echo "No colors found in the provided files."
+  exit 1
+fi
+
+# Loop from 1 to length of colors array by index
+color_list=""
+for i in {1..${#colors[@]}}; do
+  color_list+="\"${colors[$i]}\" "
+  # echo "Color $i: ${colors[$i]}"
+  
+done
+
+# Add clear to the color list
+colors+=("#00000000")  # Adding clear color to the end of the list
+
+# Create a palette file using the normalized colors
+magick -size 50x"${#normalized_colors[@]}" \
+  $(for color in "${colors[@]}"; do echo "xc:$color"; done) \
+  -append "$output_file"
+
+# # echo "Creating palette with colors: $color_list"
+# exec "./create-palette \"$output_file\" $color_list"
