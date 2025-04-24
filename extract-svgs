@@ -17,7 +17,7 @@ function usage() {
     echo "It also adds a small rectangle in two corners of the image to help with alignment and sizing."
     echo
     echo "Usage:"
-    echo "  $0 <input_image> <output_location> [--color-count <color_count>] [--rect-size|-s <rect_size>] [--alignment-corners|-a (tl|tr|bl|br|none)] [--help] [--no-confirm|-n] [--delete-output|-d] [--palette|-p <palette_file>]"
+    echo "  $0 <input_image> <output_location> [--color-count <color_count>] [--rect-size|-s <rect_size>] [--alignment-corners|-a (tl|tr|bl|br|none)] [--help] [--no-confirm|-n] [--delete-output|-d] [--palette|-p <palette_file>] [--skip-path-conversion|-S]"
     echo
     echo "Options:"
     echo "  -a (tlbr|trbl|none), --rect-corners <corners>   Set the corners of the rectangle (default: tlbr)"
@@ -36,6 +36,7 @@ function usage() {
     echo "  -p <palette_file>, --palette <palette_file>     Use a color palette file to limit the colors"
     echo "  -n, --no-confirm                                Skip confirmation before processing"
     echo "  -s <rect_size>, --rect-size <rect_size>         Set the size of the rectangle (default: 100)"
+    echo "  -S, --skip-path-conversion                      Skip the conversion of SVGs to all PATH elements"
     echo
     echo "Example: $0 input.jpg output.png 16 --rect-size 100 --rect-corners tlbr"
     exit 1
@@ -55,6 +56,7 @@ OUTPUT_LOCATION=$2
 # Set values for arguments
 RECT_SIZE=100
 NO_CONFIRM=false
+SKIP_PATH_CONVERSION=false
 
 # Parse optional arguments
 shift 2
@@ -105,6 +107,10 @@ while [[ $# -gt 0 ]]; do
         -p|--palette)
             PALETTE_FILE=$2
             shift 2
+            ;;
+        -S|--skip-path-conversion)
+            SKIP_PATH_CONVERSION=true
+            shift
             ;;
         *)
             echo "Unknown option: $1"
@@ -365,6 +371,8 @@ fi
 
 # Extract the alpha channel from the image
 ALPHA_IMAGE="$OUTPUT_LOCATION/transparent_$FILE_SUBEXT.png"
+ALPHA_IMAGE_SVG="$OUTPUT_LOCATION/transparent_$FILE_SUBEXT.svg"
+
 magick "$COLOR_IMAGE" -alpha extract "$ALPHA_IMAGE"
 # Check if the alpha extraction was successful
 if [ $? -ne 0 ]; then
@@ -374,6 +382,10 @@ fi
 # Display the alpha channel
 echo "Alpha channel saved to $ALPHA_IMAGE"
 echo
+
+echo -n "Converting alpha channel to SVG..."
+magick "$ALPHA_IMAGE" -monochrome pgm:- | potrace -s -o "$ALPHA_IMAGE_SVG"
+echo "Done."
 
 # Get Width and Height of Image
 WIDTH=$(magick identify -format "%w" "$COLOR_IMAGE")
@@ -386,6 +398,7 @@ INDEX=1
 for COLOR in "${COLOR_ARRAY[@]}"; do
     FILECOLOR=$(echo ${COLOR:0:7} | sed 's/#//g')
     TEMP_FILENAME="$OUTPUT_LOCATION/temp_$FILECOLOR.$FILE_SUBEXT.png"
+    TEMP_COLOR_FILENAME="$OUTPUT_LOCATION/temp_$FILECOLOR.$FILE_SUBEXT.singlecolor.png"
     OUTPUT_FILENAME_BASE="$OUTPUT_LOCATION/$FILECOLOR.$FILE_SUBEXT.layer"
     OUTPUT_FILENAME_SVG="$OUTPUT_FILENAME_BASE.svg"
     OUTPUT_FILENAME_PNG="$OUTPUT_FILENAME_BASE.png"
@@ -455,7 +468,10 @@ for COLOR in "${COLOR_ARRAY[@]}"; do
     fi
 
     echo -n "- Converting image to SVG..."
-    magick "$TEMP_FILENAME" -fill transparent +opaque "$COLOR" -statistic Median 4 -flatten -monochrome pgm:- | potrace -s --color="${COLOR:0:7}" -o "$OUTPUT_FILENAME_SVG"
+
+    magick "$TEMP_FILENAME" -fill transparent +opaque "$COLOR" -statistic Median 4 -flatten "$TEMP_COLOR_FILENAME"
+    magick "$TEMP_COLOR_FILENAME" -fill black -opaque "$COLOR" -monochrome pgm:- | potrace -s --color="${COLOR:0:7}" -o "$OUTPUT_FILENAME_SVG"
+
     # Check if the conversion was successful
     if [ $? -ne 0 ]; then
         echo "SVG conversion failed!"
@@ -470,15 +486,19 @@ for COLOR in "${COLOR_ARRAY[@]}"; do
         # echo "SVG has drawable elements. Saving as $OUTPUT_FILENAME_SVG"
         echo "done"
 
-        echo -n "- Converting SVG shapes to paths..."
-        # Convert the SVG shapes to paths
-        inkscape "$OUTPUT_FILENAME_SVG" --export-text-to-path --export-filename="$OUTPUT_FILENAME_SVG"
-        # Check if the conversion was successful
-        if [ $? -ne 0 ]; then
-            echo "SVG conversion failed!"
-            exit 1
+        if [ "$SKIP_PATH_CONVERSION" = true ]; then
+            echo "- Skipping conversion to paths"
+        else
+            echo -n "- Converting SVG shapes to paths..."
+            # Convert the SVG shapes to paths
+            inkscape "$OUTPUT_FILENAME_SVG" --export-text-to-path --export-filename="$OUTPUT_FILENAME_SVG"
+            # Check if the conversion was successful
+            if [ $? -ne 0 ]; then
+                echo "SVG conversion failed!"
+                exit 1
+            fi
+            echo "done"
         fi
-        echo "done"
     else
         # echo "SVG has no drawable elements. Skipping $OUTPUT_FILENAME_SVG"
         # rm "$OUTPUT_FILENAME_SVG"
@@ -487,6 +507,7 @@ for COLOR in "${COLOR_ARRAY[@]}"; do
 
     # Clean up the temporary file
     rm $TEMP_FILENAME
+    rm $TEMP_COLOR_FILENAME
 done
 
 echo "All done!"
