@@ -469,9 +469,15 @@ for COLOR in "${COLOR_ARRAY[@]}"; do
 
     echo -n "- Converting image to SVG..."
 
-    magick "$TEMP_FILENAME" -fill transparent +opaque "$COLOR" -statistic Median 4 -flatten "$TEMP_COLOR_FILENAME"
-    magick "$TEMP_COLOR_FILENAME" -fill black -opaque "$COLOR" -monochrome pgm:- | potrace -s --color="${COLOR:0:7}" -o "$OUTPUT_FILENAME_SVG"
-
+    if [[ "${COLOR:0:7}" == "#FFFFFF" ]]; then
+        echo -n "Using special White process..."
+        magick "$TEMP_FILENAME" -fill transparent +opaque "#FFFFFF" -negate -statistic Median 4 -monochrome pgm:- | potrace -s --color="#FFFFFF" -o "$OUTPUT_FILENAME_SVG"
+        # magick "$TEMP_FILENAME" -fill transparent +opaque "$COLOR" -negate -statistic Median 4 "$TEMP_COLOR_FILENAME"
+        # magick "$TEMP_COLOR_FILENAME" -fill white -opaque transparent -monochrome pgm:- | potrace -s --color="${COLOR:0:7}" -o "$OUTPUT_FILENAME_SVG"
+    else
+        magick "$TEMP_FILENAME" -fill transparent +opaque "$COLOR" -statistic Median 4 -flatten "$TEMP_COLOR_FILENAME"
+        magick "$TEMP_COLOR_FILENAME" -fill black -opaque "$COLOR" -monochrome pgm:- | potrace -s --color="${COLOR:0:7}" -o "$OUTPUT_FILENAME_SVG"
+    fi
     # Check if the conversion was successful
     if [ $? -ne 0 ]; then
         echo "SVG conversion failed!"
